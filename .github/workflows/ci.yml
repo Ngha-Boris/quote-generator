@@ -10,17 +10,23 @@ on:
       - main
       - develop
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository_owner }}
 
 jobs:
-  # ─────────────────────────────────────────
-  # JOB 1 – Lint & Test the Rust backend
-  # ─────────────────────────────────────────
   backend-ci:
     name: Backend – Lint & Test (Rust)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     services:
       postgres:
@@ -50,7 +56,6 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      # Cache compiled dependencies so subsequent runs are fast
       - name: Cache Cargo registry & build artefacts
         uses: actions/cache@v4
         with:
@@ -78,12 +83,11 @@ jobs:
         working-directory: backend
         run: cargo build --release
 
-  # ─────────────────────────────────────────
-  # JOB 2 – Lint & Test the React frontend
-  # ─────────────────────────────────────────
   frontend-ci:
     name: Frontend – Lint & Test (React)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -112,16 +116,11 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-  # ─────────────────────────────────────────
-  # JOB 3 – Build & push Docker images
-  #          (only on pushes to main/develop)
-  # ─────────────────────────────────────────
   docker-build:
-    name: Docker – Build & Push Images
+    name: Docker – Build & Push (${{ matrix.service }})
     runs-on: ubuntu-latest
     needs: [backend-ci, frontend-ci]
     if: github.event_name == 'push'
-
     permissions:
       contents: read
       packages: write
@@ -161,6 +160,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push ${{ matrix.service }} image
+        id: push
         uses: docker/build-push-action@v5
         with:
           context: ${{ matrix.context }}
@@ -170,15 +170,20 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: false
 
-  # ─────────────────────────────────────────
-  # JOB 4 – Integration test with Compose
-  # ─────────────────────────────────────────
+      - name: Log image digest
+        run: |
+          echo "${{ matrix.service }} digest: ${{ steps.push.outputs.digest }}"
+          echo "${{ matrix.service }} tags: ${{ steps.meta.outputs.tags }}"
+
   integration-test:
     name: Integration – Docker Compose health check
     runs-on: ubuntu-latest
     needs: [backend-ci, frontend-ci]
     if: github.event_name == 'push'
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -227,57 +232,129 @@ jobs:
         if: always()
         run: docker compose down -v
 
-  # ─────────────────────────────────────────
-  # JOB 5 – Deploy (main branch only)
-  # ─────────────────────────────────────────
   deploy:
     name: Deploy – Production
     runs-on: ubuntu-latest
     needs: [docker-build, integration-test]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions: {}
 
     environment:
       name: production
       url: ${{ vars.DEPLOY_URL }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Deployment summary header
+        run: |
+          echo "## 🚀 Production Deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Commit:** \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Triggered by:** ${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Timestamp:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy to server via SSH
+        id: ssh-deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          fingerprint: ${{ secrets.SSH_HOST_FINGERPRINT }}
+          passphrase: ""
+          script_stop: true
+          command_timeout: 10m
           script: |
-            set -e
-            cd ${{ secrets.DEPLOY_PATH }}
+            set -euo pipefail
 
-            echo "Pulling latest images..."
+            DEPLOY_PATH="${{ secrets.DEPLOY_PATH }}"
+            HEALTH_URL="${{ vars.HEALTH_CHECK_URL }}"
+            MAX_RETRIES=24
+            RETRY_INTERVAL=5
+
+            : "${HEALTH_URL:=http://localhost/api/health}"
+
+            cd "$DEPLOY_PATH"
+
+            echo "=== Pre-deploy: snapshot current container image references ==="
+            BACKEND_CID=$(docker compose ps -q backend 2>/dev/null || true)
+            FRONTEND_CID=$(docker compose ps -q frontend 2>/dev/null || true)
+
+            BACKEND_OLD_HASH=""
+            BACKEND_OLD_REPO_TAG=""
+            FRONTEND_OLD_HASH=""
+            FRONTEND_OLD_REPO_TAG=""
+
+            if [ -n "$BACKEND_CID" ]; then
+              BACKEND_OLD_HASH=$(docker inspect --format='{{.Image}}' "$BACKEND_CID" 2>/dev/null || true)
+              BACKEND_OLD_REPO_TAG=$(docker inspect --format='{{index .Config.Image}}' "$BACKEND_CID" 2>/dev/null || true)
+              echo "Current backend: $BACKEND_OLD_REPO_TAG (hash: ${BACKEND_OLD_HASH:0:19}...)"
+            fi
+
+            if [ -n "$FRONTEND_CID" ]; then
+              FRONTEND_OLD_HASH=$(docker inspect --format='{{.Image}}' "$FRONTEND_CID" 2>/dev/null || true)
+              FRONTEND_OLD_REPO_TAG=$(docker inspect --format='{{index .Config.Image}}' "$FRONTEND_CID" 2>/dev/null || true)
+              echo "Current frontend: $FRONTEND_OLD_REPO_TAG (hash: ${FRONTEND_OLD_HASH:0:19}...)"
+            fi
+
+            echo "=== Pulling latest images ==="
             docker compose pull
 
-            echo "Restarting services with zero-downtime..."
+            echo "=== Restarting services (zero-downtime) ==="
             docker compose up -d --remove-orphans
 
-            echo "Verifying backend health..."
-            for i in $(seq 1 20); do
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/health || true)
-              if [ "$STATUS" = "200" ]; then
-                echo "Deployment successful!"
+            echo "=== Waiting for containers to stabilise ==="
+            sleep 5
+
+            echo "=== Post-deploy health check (up to $((MAX_RETRIES * RETRY_INTERVAL))s) ==="
+            for i in $(seq 1 $MAX_RETRIES); do
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" 2>/dev/null || echo "000")
+              if [ "$HTTP_STATUS" = "200" ]; then
+                echo "✅ Health check passed on attempt $i (HTTP $HTTP_STATUS)"
+                echo "=== Pruning dangling images from previous deploys ==="
+                docker image prune -f --filter "until=24h" 2>/dev/null || true
+                echo "=== Deployment successful ==="
                 exit 0
               fi
-              sleep 5
+              echo "Attempt $i/$MAX_RETRIES: HTTP $HTTP_STATUS – retrying in ${RETRY_INTERVAL}s..."
+              sleep $RETRY_INTERVAL
             done
-            echo "Health check failed after deployment!"
+
+            echo "❌ Health check failed after $MAX_RETRIES attempts"
+            echo "=== Initiating rollback ==="
+
+            if [ -n "$BACKEND_OLD_HASH" ] && [ -n "$BACKEND_OLD_REPO_TAG" ]; then
+              docker tag "$BACKEND_OLD_HASH" "$BACKEND_OLD_REPO_TAG" 2>/dev/null || true
+              echo "Re-tagged backend: ${BACKEND_OLD_HASH:0:19}... -> $BACKEND_OLD_REPO_TAG"
+            fi
+            if [ -n "$FRONTEND_OLD_HASH" ] && [ -n "$FRONTEND_OLD_REPO_TAG" ]; then
+              docker tag "$FRONTEND_OLD_HASH" "$FRONTEND_OLD_REPO_TAG" 2>/dev/null || true
+              echo "Re-tagged frontend: ${FRONTEND_OLD_HASH:0:19}... -> $FRONTEND_OLD_REPO_TAG"
+            fi
+
+            docker compose up -d --force-recreate --remove-orphans
+            echo "Rollback containers restarted with previous images"
             exit 1
 
-      - name: Notify on success
+      - name: Write deployment success summary
         if: success()
         run: |
-          echo "✅ Deployment to production succeeded (commit: ${{ github.sha }})"
+          echo "### ✅ Deployment Succeeded" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Detail | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | production |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| URL | ${{ vars.DEPLOY_URL }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Status | Healthy ✅ |" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Notify on failure
+      - name: Write deployment failure summary
         if: failure()
         run: |
-          echo "❌ Deployment failed – check the logs above"
+          echo "### ❌ Deployment Failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Detail | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | production |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Status | Failed – automatic rollback attempted |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "> Check SSH deploy logs above. Use the **Rollback** workflow if manual intervention is needed." >> "$GITHUB_STEP_SUMMARY"

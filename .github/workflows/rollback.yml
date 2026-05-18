@@ -1,0 +1,144 @@
+name: Production Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: "Commit SHA to rollback to (7+ chars)"
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    name: Rollback – Production
+    runs-on: ubuntu-latest
+    permissions: {}
+
+    environment:
+      name: production
+      url: ${{ vars.DEPLOY_URL }}
+
+    steps:
+      - name: Rollback summary header
+        run: |
+          echo "## 🔄 Production Rollback" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Target SHA:** \`${{ inputs.target_sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Triggered by:** ${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Timestamp:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull SHA-tagged images
+        run: |
+          SHA_TAG="sha-${{ inputs.target_sha }}"
+          echo "Pulling images with tag: $SHA_TAG"
+          docker pull "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/quotes-backend:${SHA_TAG}" || true
+          docker pull "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/quotes-frontend:${SHA_TAG}" || true
+
+      - name: Rollback via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          fingerprint: ${{ secrets.SSH_HOST_FINGERPRINT }}
+          passphrase: ""
+          script_stop: true
+          command_timeout: 10m
+          envs: INPUT_SHA
+        env:
+          INPUT_SHA: ${{ inputs.target_sha }}
+          REGISTRY: ghcr.io
+          IMAGE_PREFIX: ${{ github.repository_owner }}
+        script: |
+          set -euo pipefail
+
+          DEPLOY_PATH="${{ secrets.DEPLOY_PATH }}"
+          HEALTH_URL="${{ vars.HEALTH_CHECK_URL }}"
+          TARGET_SHA="$INPUT_SHA"
+          REGISTRY="${{ env.REGISTRY }}"
+          OWNER="${{ env.IMAGE_PREFIX }}"
+          MAX_RETRIES=24
+          RETRY_INTERVAL=5
+
+          : "${HEALTH_URL:=http://localhost/api/health}"
+
+          cd "$DEPLOY_PATH"
+
+          echo "=== Pulling SHA-tagged images: sha-${TARGET_SHA} ==="
+          docker pull "${REGISTRY}/${OWNER}/quotes-backend:sha-${TARGET_SHA}" || {
+            echo "❌ Backend image sha-${TARGET_SHA} not found in registry"
+            exit 1
+          }
+          docker pull "${REGISTRY}/${OWNER}/quotes-frontend:sha-${TARGET_SHA}" || {
+            echo "❌ Frontend image sha-${TARGET_SHA} not found in registry"
+            exit 1
+          }
+
+          echo "=== Re-tagging SHA images to current compose tags ==="
+          for svc in backend frontend; do
+            SHA_IMG="${REGISTRY}/${OWNER}/quotes-${svc}:sha-${TARGET_SHA}"
+            CURRENT_CID=$(docker compose ps -q "$svc" 2>/dev/null || true)
+            if [ -n "$CURRENT_CID" ]; then
+              CURRENT_REPO_TAG=$(docker inspect --format='{{index .Config.Image}}' "$CURRENT_CID" 2>/dev/null || true)
+              if [ -n "$CURRENT_REPO_TAG" ]; then
+                docker tag "$SHA_IMG" "$CURRENT_REPO_TAG"
+                echo "Re-tagged $SHA_IMG -> $CURRENT_REPO_TAG"
+              fi
+            fi
+          done
+
+          echo "=== Restarting services with rolled-back images ==="
+          docker compose up -d --force-recreate --remove-orphans
+
+          echo "=== Post-rollback health check (up to $((MAX_RETRIES * RETRY_INTERVAL))s) ==="
+          for i in $(seq 1 $MAX_RETRIES); do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" 2>/dev/null || echo "000")
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "✅ Rollback health check passed on attempt $i (HTTP $HTTP_STATUS)"
+              docker image prune -f --filter "until=24h" 2>/dev/null || true
+              echo "=== Rollback successful ==="
+              exit 0
+            fi
+            echo "Attempt $i/$MAX_RETRIES: HTTP $HTTP_STATUS – retrying in ${RETRY_INTERVAL}s..."
+            sleep $RETRY_INTERVAL
+          done
+
+          echo "❌ Rollback health check also failed!"
+          exit 1
+
+      - name: Write rollback success summary
+        if: success()
+        run: |
+          echo "### ✅ Rollback Succeeded" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Detail | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Target SHA | \`${{ inputs.target_sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | production |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| URL | ${{ vars.DEPLOY_URL }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Status | Healthy ✅ |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write rollback failure summary
+        if: failure()
+        run: |
+          echo "### ❌ Rollback Failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Detail | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Target SHA | \`${{ inputs.target_sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | production |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Status | Rollback failed – manual intervention required |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "> SSH into the server and investigate container health." >> "$GITHUB_STEP_SUMMARY"
