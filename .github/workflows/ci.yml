@@ -1,18 +1,31 @@
-name: Frontend CI (React)
+name: CI Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches:
+      - main
+      - develop
     paths:
       - 'frontend/**'
-      - '.github/workflows/frontend-ci.yml'
+      - 'backend/**'
+      - '.github/workflows/ci.yml'
   pull_request:
-    branches: [main, develop]
+    branches:
+      - main
+      - develop
     paths:
       - 'frontend/**'
-      - '.github/workflows/frontend-ci.yml'
+      - 'backend/**'
+      - '.github/workflows/ci.yml'
 
-jobs:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+      - name: Build release binary (smoke-check)
+        working-directory: backend
+        run: cargo build --release
+
   frontend-ci:
     name: Frontend – Lint & Test (React)
     runs-on: ubuntu-latest
