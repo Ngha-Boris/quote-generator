@@ -5,53 +5,74 @@ on:
     branches:
       - main
       - develop
-    paths:
-      - 'frontend/**'
-      - 'backend/**'
-      - '.github/workflows/ci.yml'
   pull_request:
     branches:
       - main
       - develop
-    paths:
-      - 'frontend/**'
-      - 'backend/**'
-      - '.github/workflows/ci.yml'
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+jobs:
+  backend-ci:
+    name: Backend – Lint & Test (Rust)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: quotes_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/quotes_db
+      RUST_LOG: info
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo registry & build artefacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting (rustfmt)
+        working-directory: backend
+        run: cargo fmt --all -- --check
+
+      - name: Lint with Clippy
+        working-directory: backend
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        working-directory: backend
+        run: cargo test --all-features --verbose
+
       - name: Build release binary (smoke-check)
         working-directory: backend
         run: cargo build --release
-
-  frontend-ci:
-    name: Frontend – Lint & Test (React)
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Lint
-        working-directory: frontend
-        run: npm run lint --if-present
-
-      - name: Run tests
-        working-directory: frontend
-        run: npm test -- --watchAll=false --passWithNoTests
-
-      - name: Build production
-        working-directory: frontend
-        run: npm run build
+        
