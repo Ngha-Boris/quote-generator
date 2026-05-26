@@ -1,4 +1,4 @@
-name: CI Pipeline
+name: Backend CI
 
 on:
   push:
@@ -75,4 +75,3 @@ jobs:
       - name: Build release binary (smoke-check)
         working-directory: backend
         run: cargo build --release
-        
