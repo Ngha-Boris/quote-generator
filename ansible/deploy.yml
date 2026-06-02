@@ -1,0 +1,7 @@
+---
+- name: Deploy Quote Generator App
+  hosts: production
+  gather_facts: true
+  roles:
+    - docker
+    - quote_generator

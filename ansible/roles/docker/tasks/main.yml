@@ -1,0 +1,23 @@
+---
+- name: Check if Docker is installed
+  command: docker --version
+  register: docker_check
+  failed_when: false
+  changed_when: false
+
+- name: Check if Docker Compose is installed
+  command: docker compose version
+  register: docker_compose_check
+  failed_when: false
+  changed_when: false
+
+- name: Report Docker status
+  debug:
+    msg:
+      - "Docker Installed: {{ docker_check.rc == 0 }}"
+      - "Docker Compose Installed: {{ docker_compose_check.rc == 0 }}"
+
+- name: Fail if Docker is missing and cannot install (sudo password required)
+  fail:
+    msg: "Docker or Docker Compose is not installed on the system, and root privileges are required to install them. Please install Docker/Docker Compose first."
+  when: docker_check.rc != 0 or docker_compose_check.rc != 0

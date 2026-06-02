@@ -80,6 +80,7 @@ Grafana   → Visualize Metrics
 * Docker Compose
 * Nginx
 * GitHub Actions
+* Ansible
 
 ## Monitoring
 
@@ -159,9 +160,22 @@ This includes:
 
 ## Start the Project
 
+Before starting, copy the example environment file and configure it:
+```bash
+cp .env.example .env
+```
+
+Build and run all services:
 ```bash
 docker compose up --build
 ```
+
+Once running, you can access the application components:
+- **Frontend App**: [http://localhost:8000](http://localhost:8000)
+- **Random Quote API**: [http://localhost:8000/api/quotes/random](http://localhost:8000/api/quotes/random)
+- **Health Check Endpoint**: [http://localhost:8000/api/health](http://localhost:8000/api/health)
+- **Prometheus Dashboard**: [http://localhost:9090](http://localhost:9090)
+- **Grafana Dashboard**: [http://localhost:3000](http://localhost:3000) (default credentials: `admin`/`admin`)
 
 ## Run in Detached Mode
 
@@ -175,9 +189,49 @@ docker compose up -d
 docker compose down
 ```
 
+# Ansible Deployment
+
+We provide Ansible playbooks and roles for deploying and tearing down the application stack locally.
+
+## Prerequisites
+
+Ensure that you have Ansible installed:
+```bash
+# Check if Ansible is installed
+ansible --version
+```
+*(If Ansible is not installed, you can install it using pip: `pip install ansible --user --break-system-packages`)*
+
+## Directory Structure
+
+The deployment playbooks are organized in the `ansible/` directory:
+- `ansible.cfg`: Configures default inventory, roles paths, and disables host key checking.
+- `inventory/hosts.ini`: Specifies target hosts (configured to target `localhost` locally).
+- `group_vars/all.yml`: Stores configurable environment variables (like DB username, password, ports).
+- `deploy.yml`: Playbook to verify Docker, template `.env`, and start the stack.
+- `shutdown.yml`: Playbook to stop and remove all services, networks, and database volumes.
+
+## Deploying the Stack
+
+To build and start all containers, generate `.env`, and run health checks:
+```bash
+cd ansible
+ansible-playbook deploy.yml
+```
+
+This playbook will verify that Docker is running, dynamically template your `.env` file, spin up the Docker Compose stack, and block until all containers (Postgres, Backend, Nginx proxy) report a `healthy` state.
+
+## Stopping the Stack
+
+To stop all services and remove containers, networks, and database volumes (equivalent to `docker compose down -v`):
+```bash
+cd ansible
+ansible-playbook shutdown.yml
+```
+
 # Environment Variables
 
-Example `.env` file:
+Example `.env` file (copy from `.env.example`):
 
 ```env
 POSTGRES_USER=postgres
@@ -188,6 +242,7 @@ DATABASE_URL=postgres://postgres:postgres@postgres:5432/quotes_db
 
 RUST_LOG=info
 ```
+
 # CI/CD Pipeline
 
 The project uses GitHub Actions for Continuous Integration and Continuous Deployment.
@@ -414,5 +469,5 @@ This project demonstrates practical experience with:
 # Team Members
 
 * Boris Ngha
-* Valentine Fuh
+* Valantine Fuh
 * Victoire Motouom
