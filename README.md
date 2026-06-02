@@ -159,9 +159,22 @@ This includes:
 
 ## Start the Project
 
+Before starting, copy the example environment file and configure it:
+```bash
+cp .env.example .env
+```
+
+Build and run all services:
 ```bash
 docker compose up --build
 ```
+
+Once running, you can access the application components:
+- **Frontend App**: [http://localhost:8000](http://localhost:8000)
+- **Random Quote API**: [http://localhost:8000/api/quotes/random](http://localhost:8000/api/quotes/random)
+- **Health Check Endpoint**: [http://localhost:8000/api/health](http://localhost:8000/api/health)
+- **Prometheus Dashboard**: [http://localhost:9090](http://localhost:9090)
+- **Grafana Dashboard**: [http://localhost:3000](http://localhost:3000) (default credentials: `admin`/`admin`)
 
 ## Run in Detached Mode
 
@@ -177,7 +190,7 @@ docker compose down
 
 # Environment Variables
 
-Example `.env` file:
+Example `.env` file (copy from `.env.example`):
 
 ```env
 POSTGRES_USER=postgres
@@ -188,6 +201,7 @@ DATABASE_URL=postgres://postgres:postgres@postgres:5432/quotes_db
 
 RUST_LOG=info
 ```
+
 # CI/CD Pipeline
 
 The project uses GitHub Actions for Continuous Integration and Continuous Deployment.
