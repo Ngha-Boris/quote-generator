@@ -1,0 +1,16 @@
+---
+# Environment variables for Quote Generator
+postgres_user: postgres
+postgres_password: supersecretpassword123
+postgres_db: quotes_db
+
+# Rust Backend
+rust_log: info
+
+# Paths
+app_dir: "/home/valantine/GIS-UDM/Nkemla/quote-generator"
+
+# Health Check
+health_check_url: "http://localhost:8000/api/health"
+health_check_retries: 24
+health_check_delay: 5
