@@ -1,0 +1,62 @@
+---
+- name: Ensure deployment directory exists
+  file:
+    path: "{{ app_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Template .env file
+  template:
+    src: env.j2
+    dest: "{{ app_dir }}/.env"
+    mode: '0600'
+
+- name: Build and start Docker containers
+  command: docker compose up -d --build
+  args:
+    chdir: "{{ app_dir }}"
+  register: docker_compose_up
+  changed_when: "'Created' in docker_compose_up.stderr or 'Started' in docker_compose_up.stderr or 'Recreated' in docker_compose_up.stderr"
+
+- name: Wait for PostgreSQL database container to be healthy
+  command: docker inspect --format='{% raw %}{{.State.Health.Status}}{% endraw %}' quote-db
+  register: db_health
+  until: db_health.stdout == "healthy"
+  retries: "{{ health_check_retries }}"
+  delay: "{{ health_check_delay }}"
+  changed_when: false
+
+- name: Wait for Backend service to be healthy
+  command: docker inspect --format='{% raw %}{{.State.Health.Status}}{% endraw %}' quote-backend
+  register: backend_health
+  until: backend_health.stdout == "healthy"
+  retries: "{{ health_check_retries }}"
+  delay: "{{ health_check_delay }}"
+  changed_when: false
+
+- name: Wait for Nginx proxy to be healthy
+  command: docker inspect --format='{% raw %}{{.State.Health.Status}}{% endraw %}' quote-nginx
+  register: nginx_health
+  until: nginx_health.stdout == "healthy"
+  retries: "{{ health_check_retries }}"
+  delay: "{{ health_check_delay }}"
+  changed_when: false
+
+- name: Verify application endpoint is reachable and returns HTTP 200
+  uri:
+    url: "{{ health_check_url }}"
+    status_code: 200
+  register: api_check
+  until: api_check.status == 200
+  retries: 5
+  delay: 2
+
+- name: Print deployment success message
+  debug:
+    msg:
+      - "Quote Generator App successfully deployed!"
+      - "Access Frontend at: http://localhost:8000"
+      - "Access Health Check at: http://localhost:8000/api/health"
+      - "Access Random Quote at: http://localhost:8000/api/quotes/random"
+      - "Prometheus: http://localhost:9090"
+      - "Grafana: http://localhost:3000"
