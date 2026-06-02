@@ -1,0 +1,23 @@
+---
+- name: Shutdown Quote Generator App
+  hosts: production
+  gather_facts: false
+  tasks:
+    - name: Stop and remove containers, networks, and volumes
+      command: docker compose down -v
+      args:
+        chdir: "{{ app_dir }}"
+      register: compose_down
+      changed_when: "'Removing' in compose_down.stderr or 'Removed' in compose_down.stderr"
+
+    - name: Verify all containers are stopped
+      command: docker compose ps -q
+      args:
+        chdir: "{{ app_dir }}"
+      register: remaining_containers
+      changed_when: false
+      failed_when: remaining_containers.stdout != ""
+
+    - name: Print shutdown confirmation
+      debug:
+        msg: "Quote Generator stack has been successfully shut down and volumes have been removed."
