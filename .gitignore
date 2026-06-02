@@ -25,3 +25,8 @@ Thumbs.db
 # Local virtual environment
 myenv/
 
+# Node dependencies
+node_modules/
+.eslintcache
+
+
