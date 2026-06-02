@@ -1,0 +1,126 @@
+name: Docker CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  docker-build:
+    name: Build & Push (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        include:
+          - service: backend
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+          - service: frontend
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Registry Login
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image Meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/quotes-${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build & Push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+  integration-test:
+    name: Integration Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Services
+        run: |
+          cat <<'EOF' > .env
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=postgres
+          POSTGRES_DB=quotes_db
+          DATABASE_URL=postgres://postgres:postgres@postgres:5432/quotes_db
+          RUST_LOG=info
+          EOF
+          docker compose up --build -d
+
+      - name: Wait for Health Check
+        run: |
+          for i in $(seq 1 20); do
+            if curl -s -o /dev/null -w "%{http_code}" http://localhost/api/health | grep -q "200"; then
+              echo "Backend is healthy!"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Backend failed health check!"
+          docker compose logs
+          exit 1
+
+      - name: Stop Services
+        if: always()
+        run: docker compose down -v
+
+  deploy:
+    name: Deploy - Production
+    runs-on: ubuntu-latest
+    needs: [docker-build, integration-test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          fingerprint: ${{ secrets.SSH_HOST_FINGERPRINT }}
+          script: |
+            cd "${{ secrets.DEPLOY_PATH }}"
+            docker compose pull
+            docker compose up -d --remove-orphans
+            
+            # Simple health check loop
+            for i in $(seq 1 10); do
+              if curl -s -o /dev/null -w "%{http_code}" "${{ vars.HEALTH_CHECK_URL }}" | grep -q "200"; then
+                echo "Deployment is healthy!"
+                exit 0
+              fi
+              echo "Waiting for health check... ($i/10)"
+              sleep 5
+            done
+            echo "Health check failed!"
+            exit 1

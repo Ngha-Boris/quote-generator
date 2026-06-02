@@ -2,23 +2,13 @@ name: Frontend CI
 
 on:
   push:
-    branches:
-      - main
-      - develop
+    branches: [main, develop]
   pull_request:
-    branches:
-      - main
-      - develop
-
-concurrency:
-  group: frontend-ci-${{ github.ref }}
-  cancel-in-progress: true
+    branches: [main, develop]
 
 jobs:
-  frontend-ci:
-    name: Frontend – Lint & Test (React)
+  frontend:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -37,10 +27,10 @@ jobs:
         working-directory: frontend
         run: npm run lint --if-present
 
-      - name: Run tests
+      - name: Test
         working-directory: frontend
         run: npm test -- --watchAll=false --passWithNoTests
 
-      - name: Build production
+      - name: Build
         working-directory: frontend
         run: npm run build
