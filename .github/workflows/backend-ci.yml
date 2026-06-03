@@ -2,25 +2,13 @@ name: Backend CI
 
 on:
   push:
-    branches:
-      - main
-      - develop
+    branches: [main, develop]
   pull_request:
-    branches:
-      - main
-      - develop
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+    branches: [main, develop]
 
 jobs:
-  backend-ci:
-    name: Backend – Lint & Test (Rust)
+  backend:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
     services:
       postgres:
         image: postgres:16-alpine
@@ -38,18 +26,16 @@ jobs:
 
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/quotes_db
-      RUST_LOG: info
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install stable Rust toolchain
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
-      - name: Cache Cargo registry & build artefacts
+      - name: Cache Cargo
         uses: actions/cache@v4
         with:
           path: |
@@ -57,21 +43,19 @@ jobs:
             ~/.cargo/git
             backend/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
 
-      - name: Check formatting (rustfmt)
+      - name: Check Format
         working-directory: backend
         run: cargo fmt --all -- --check
 
-      - name: Lint with Clippy
+      - name: Clippy Lints
         working-directory: backend
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run tests
+      - name: Run Tests
         working-directory: backend
-        run: cargo test --all-features --verbose
+        run: cargo test --all-features
 
-      - name: Build release binary (smoke-check)
+      - name: Smoke Build
         working-directory: backend
         run: cargo build --release

@@ -204,19 +204,19 @@ ansible --version
 
 ## Directory Structure
 
-The deployment playbooks are organized in the `ansible/` directory:
+The deployment files are organized in the `ansible/` directory:
 - `ansible.cfg`: Configures default inventory, roles paths, and disables host key checking.
 - `inventory/hosts.ini`: Specifies target hosts (configured to target `localhost` locally).
-- `group_vars/all.yml`: Stores configurable environment variables (like DB username, password, ports).
-- `deploy.yml`: Playbook to verify Docker, template `.env`, and start the stack.
-- `shutdown.yml`: Playbook to stop and remove all services, networks, and database volumes.
+- `playbooks/deploy.yml`: Playbook to verify Docker, template `.env`, and start the stack.
+- `playbooks/shutdown.yml`: Playbook to stop and remove all services, networks, and database volumes.
+- `playbooks/group_vars/all.yml`: Stores configurable environment variables (like DB username, password, ports).
 
 ## Deploying the Stack
 
 To build and start all containers, generate `.env`, and run health checks:
 ```bash
 cd ansible
-ansible-playbook deploy.yml
+ansible-playbook playbooks/deploy.yml
 ```
 
 This playbook will verify that Docker is running, dynamically template your `.env` file, spin up the Docker Compose stack, and block until all containers (Postgres, Backend, Nginx proxy) report a `healthy` state.
@@ -226,8 +226,9 @@ This playbook will verify that Docker is running, dynamically template your `.en
 To stop all services and remove containers, networks, and database volumes (equivalent to `docker compose down -v`):
 ```bash
 cd ansible
-ansible-playbook shutdown.yml
+ansible-playbook playbooks/shutdown.yml
 ```
+
 
 # Environment Variables
 
