@@ -1,0 +1,16 @@
+{
+  "name": "quote-generator-frontend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Static frontend for Quote Generator",
+  "main": "index.html",
+  "scripts": {
+    "lint": "eslint js/",
+    "test": "echo \"No tests defined\" && exit 0",
+    "build": "echo \"Static build: no compile needed\" && exit 0"
+  },
+  "devDependencies": {
+    "eslint": "^9.3.0"
+  },
+  "private": true
+}
