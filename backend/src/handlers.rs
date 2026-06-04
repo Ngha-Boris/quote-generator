@@ -144,6 +144,6 @@ mod tests {
         let _ = health_check as fn(State<AppState>) -> _;
 
         // If we reach here, all handlers have correct signatures
-        assert!(true);
+        // All handler functions are callable with correct signatures
     }
 }

@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn test_seed_quote_content() {
         // Verify a specific quote is in the seed data
-        let seed_quotes = vec![
+        let seed_quotes = [
             (
                 "The only way to do great work is to love what you do.",
                 "Steve Jobs",

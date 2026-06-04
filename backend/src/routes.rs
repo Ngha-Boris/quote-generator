@@ -50,7 +50,7 @@ mod tests {
     fn test_router_configuration_compiles() {
         // Verify that route configuration compiles correctly
         // The routes are: /api/quotes/random, /api/quotes, /api/health, /metrics
-        let expected_routes = vec![
+        let expected_routes = [
             "/api/quotes/random",
             "/api/quotes",
             "/api/health",
@@ -76,7 +76,7 @@ mod tests {
             .allow_headers(Any);
 
         // If we get here, CORS configuration is valid
-        assert!(true);
+        // CORS layer created successfully
     }
 
     /// Compile-time check for required traits on Router with AppState

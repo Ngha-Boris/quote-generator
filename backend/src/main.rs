@@ -88,7 +88,7 @@ mod tests {
         };
 
         // If we reach this point, all modules compile correctly
-        assert!(true);
+        // Model construction successful
     }
 
     #[test]
@@ -116,13 +116,13 @@ mod tests {
         };
 
         // All types are accessible, test passes
-        assert!(true);
+        // Successfully constructed all model types
     }
 
     #[test]
     fn test_environment_variables_expected() {
         // Document expected environment variables
-        let expected_vars = vec!["DATABASE_URL", "RUST_LOG"];
+        let expected_vars = ["DATABASE_URL", "RUST_LOG"];
         assert_eq!(expected_vars.len(), 2);
         assert!(expected_vars.contains(&"DATABASE_URL"));
         assert!(expected_vars.contains(&"RUST_LOG"));

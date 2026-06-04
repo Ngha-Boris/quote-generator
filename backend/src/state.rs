@@ -28,6 +28,5 @@ mod tests {
     fn test_app_state_traits() {
         // This test verifies AppState has required traits at compile time
         // The functions above would fail to compile if traits were missing
-        assert!(true);
     }
 }
