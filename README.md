@@ -87,6 +87,11 @@ Grafana   → Visualize Metrics
 * Prometheus
 * Grafana
 
+## Load Testing
+
+* k6
+* InfluxDB (optional output backend)
+
 # Features
 
 ## User Features
@@ -383,6 +388,68 @@ Example dashboards:
 * RAM Usage
 * Container Status
 * Backend Response Time
+* k6 Load Testing Results
+
+# Load Testing
+
+The project includes comprehensive load testing using [k6](https://k6.io/) to verify performance, reliability, and identify breaking points.
+
+## Quick Start
+
+Use the Makefile for simple test execution:
+
+```bash
+# Start all services
+make up
+
+# Run smoke test (30 seconds)
+make test-smoke
+
+# Run full load test (~6 minutes)
+make test-load
+
+# Run stress test to find breaking point (~11 minutes)
+make test-stress
+
+# Run spike test (~3 minutes)
+make test-spike
+
+# Run long soak test (~40 minutes)
+make test-soak
+```
+
+## Test Types
+
+| Test | Duration | Users | Purpose |
+|------|----------|-------|---------|
+| **Smoke** | 30s | 2 | Verify basic functionality |
+| **Load** | ~6min | 100 | Simulate normal traffic |
+| **Stress** | ~11min | 1000 | Find breaking point |
+| **Spike** | ~3min | 500 | Test sudden traffic spikes |
+| **Soak** | ~40min | 50 | Long-term stability |
+
+## Viewing Results
+
+### Console Output
+k6 prints real-time statistics to the terminal showing:
+- Request rate (RPS)
+- Response times (min, avg, max, p90, p95, p99)
+- Error rates
+- Virtual users (VUs)
+
+### Grafana Dashboard (Automatic)
+Test results are automatically stored in **InfluxDB** and displayed in the **"k6 Load Testing Results"** dashboard at http://localhost:3000 (admin/admin).
+
+The dashboard shows:
+- Virtual Users over time
+- Request rate (RPS)
+- Response latencies (p50, p95, p99)
+- Error rates
+- HTTP status code distribution
+
+**No setup required** - just run a test and refresh Grafana!
+
+See the full [load testing documentation](./load-testing/README.md) for more details.
 
 # Reverse Proxy
 

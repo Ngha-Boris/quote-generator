@@ -1,0 +1,433 @@
+# Mermaid Architecture Diagrams for Quote Generator Project
+
+## 1. High-Level System Architecture
+
+```mermaid
+flowchart TB
+    subgraph External["External"]
+        User["👤 User"]
+    end
+
+    subgraph NginxProxy["Nginx Reverse Proxy :80"]
+        Nginx["Nginx\nPort 8000"]
+    end
+
+    subgraph Application["Application Layer"]
+        direction TB
+        Frontend["📱 Frontend\nHTML/CSS/JS\nServed by Nginx"]
+        Backend["⚙️ Backend API\nRust + Axum\nPort 8080"]
+    end
+
+    subgraph DataLayer["Data Layer"]
+        Database[("🗄️ PostgreSQL\nPort 5435\nQuotes Data")]
+    end
+
+    subgraph Monitoring["Monitoring & Observability"]
+        Prometheus[("📊 Prometheus\nPort 9090\nMetrics Collection")]
+        Grafana["📈 Grafana\nPort 3000\nDashboards"]
+        InfluxDB[("💾 InfluxDB\nPort 8086\nk6 Test Results")]
+    end
+
+    subgraph Testing["Load Testing"]
+        K6["🧪 k6\nLoad Testing"]
+    end
+
+    User -->|HTTP Request| Nginx
+    Nginx -->|Static Assets| Frontend
+    Nginx -->|API Calls /api/*| Backend
+    Backend -->|SQL Queries| Database
+    Backend -->|Exposes /metrics| Prometheus
+    Prometheus -->|Data Source| Grafana
+    K6 -->|Test Traffic| Nginx
+    K6 -->|Write Results| InfluxDB
+    InfluxDB -->|Query Results| Grafana
+```
+
+---
+
+## 2. Request Flow Sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant N as Nginx<br/>:80
+    participant F as Frontend<br/>Static Files
+    participant B as Backend API<br/>:8080
+    participant DB as PostgreSQL<br/>:5432
+
+    Note over U,DB: Quote Generation Flow
+    
+    U->>N: GET / (Homepage)
+    N->>F: Serve index.html
+    F-->>N: HTML/CSS/JS
+    N-->>U: Complete Page
+
+    U->>N: GET /api/quotes/random
+    N->>B: Forward Request
+    
+    B->>B: metrics.counter++
+    B->>DB: SELECT * FROM quotes ORDER BY RANDOM() LIMIT 1
+    DB-->>B: Quote {id, quote, author}
+    B-->>N: JSON Response
+    N-->>U: {quote: "...", author: "..."}
+
+    Note over U,DB: Health Check Flow
+    
+    U->>N: GET /api/health
+    N->>B: Forward Request
+    B->>DB: SELECT 1 (Health Check)
+    DB-->>B: OK
+    B-->>N: {status: "healthy"}
+    N-->>U: Health Response
+```
+
+---
+
+## 3. Docker Compose Service Architecture
+
+```mermaid
+graph TB
+    subgraph DockerNetwork["Docker Network: app-network"]
+        
+        subgraph DatabaseServices["💾 Database Services"]
+            Postgres[("PostgreSQL 16\nContainer: quote-db\nPort 5435:5432\nVolume: postgres_data")]
+            Influx[("InfluxDB 1.8\nContainer: quote-influxdb\nPort 8086\nVolume: influxdb_data")]
+        end
+
+        subgraph AppServices["⚙️ Application Services"]
+            Backend["Rust Backend\nContainer: quote-backend\nPort 8080\nBuild: ./backend")]
+            Frontend["Frontend\nContainer: quote-frontend\nBuild: ./frontend")]
+        end
+
+        subgraph ProxyServices["🌐 Proxy Services"]
+            NginxProxy["Nginx Reverse Proxy\nContainer: quote-nginx\nPort 8000:80")]
+        end
+
+        subgraph ObservabilityServices["📊 Observability Services"]
+            PrometheusSvc["Prometheus\nContainer: quote-prometheus\nPort 9090\nVolume: prometheus_data")]
+            GrafanaSvc["Grafana\nContainer: quote-grafana\nPort 3000\nVolume: grafana_data")]
+        end
+
+        subgraph TestingServices["🧪 Testing Services"]
+            K6Svc["k6 Load Testing\nContainer: quote-k6\nProfile: loadtest")]
+        end
+    end
+
+    NginxProxy -->|Depends on| Frontend
+    NginxProxy -->|Depends on| Backend
+    Backend -->|Depends on| Postgres
+    Backend -->|Condition: healthy| Postgres
+    GrafanaSvc -->|Depends on| PrometheusSvc
+    K6Svc -->|Depends on| NginxProxy
+    K6Svc -->|Condition: healthy| Influx
+    PrometheusSvc -->|Scrapes| Backend
+```
+
+---
+
+## 4. CI/CD Pipeline Flow
+
+```mermaid
+flowchart LR
+    subgraph Dev["Development"]
+        DevLocal[Developer Local]
+        FeatureBranch[Feature Branch]
+        MainBranch[main Branch]
+    end
+
+    subgraph CICD["GitHub Actions CI/CD"]
+        direction TB
+        
+        subgraph BackendCI["🔧 Backend CI"]
+            Fmt[rustfmt]
+            Clippy[clippy lint]
+            Test[cargo test]
+            BuildRelease[cargo build --release]
+        end
+
+        subgraph FrontendCI["🎨 Frontend CI"]
+            NpmInstall[npm ci]
+            Lint[npm run lint]
+            TestFE[npm test]
+            BuildFE[npm run build]
+        end
+
+        subgraph DockerCI["🐳 Docker Build"]
+            BuildBackend[Build Backend Image]
+            BuildFrontend[Build Frontend Image]
+            PushGHCR[Push to GHCR]
+            TagImages[Tag: sha-*, latest]
+        end
+
+        subgraph Deploy["🚀 Deploy (main only)"]
+            SSH[SSH to Server]
+            Snapshot[Snapshot Current Images]
+            Pull[Pull New Images]
+            Up[docker compose up]
+            Health[Health Check]
+            Rollback{Rollback?}
+        end
+    end
+
+    subgraph Production["Production"]
+        Server[Production Server]
+    end
+
+    DevLocal -->|git push| FeatureBranch
+    FeatureBranch -->|Pull Request| MainBranch
+    
+    MainBranch --> BackendCI
+    MainBranch --> FrontendCI
+    
+    BackendCI --> DockerCI
+    FrontendCI --> DockerCI
+    
+    DockerCI -->|main branch| Deploy
+    
+    Deploy -->|Success| Server
+    Deploy -->|Failure| Rollback
+    Rollback -->|Auto| Server
+```
+
+---
+
+## 5. Monitoring & Metrics Flow
+
+```mermaid
+flowchart TB
+    subgraph App["Application Layer"]
+        BackendAPI["Backend API\nAxum Framework"]
+    end
+
+    subgraph Metrics["Metrics Pipeline"]
+        Counter["metrics.counter!\nPrometheus Registry"]
+        PrometheusServer[("Prometheus Server\nScrape Interval: 15s\nRetention: 15d")]
+    end
+
+    subgraph Visualization["Visualization"]
+        GrafanaDashboard["Grafana Dashboards\n- API Requests/min\n- Response Times\n- Error Rates\n- System Resources"]
+    end
+
+    subgraph Alerting["Alerting (Future)"]
+        Alerts["Alert Rules\nHigh Error Rate\nHigh Latency\nService Down"]
+    end
+
+    BackendAPI -->|Increment| Counter
+    Counter -->|/metrics endpoint| PrometheusServer
+    PrometheusServer -->|Data Source| GrafanaDashboard
+    PrometheusServer -.->|Future| Alerts
+```
+
+---
+
+## 6. Load Testing Architecture
+
+```mermaid
+flowchart LR
+    subgraph LoadTest["Load Testing with k6"]
+        K6Script["k6 Test Scripts\nsmoke_test.js\nload_test.js\nstress_test.js\nspike_test.js\nsoak_test.js"]
+        
+        subgraph Scenarios["Test Scenarios"]
+            Smoke["🚬 Smoke\n2 VUs, 30s"]
+            Load["⚡ Load\n100 VUs, 6min"]
+            Stress["🔥 Stress\n1000 VUs, 11min"]
+            Spike["📈 Spike\n500 VUs, 3min"]
+            Soak["🌊 Soak\n50 VUs, 40min"]
+        end
+
+        K6Runner["k6 Container\ngrafana/k6:latest"]
+    end
+
+    subgraph Target["Target System"]
+        Nginx["Nginx Proxy\nPort 80"]
+        Backend["Backend API"]
+    end
+
+    subgraph Results["Results Storage"]
+        InfluxDB[("InfluxDB\nTime Series Data")]
+        Grafana["Grafana Dashboard\n'k6 Load Testing Results'"]
+    end
+
+    K6Script --> Scenarios
+    Scenarios --> K6Runner
+    K6Runner -->|HTTP Requests| Nginx
+    Nginx --> Backend
+    K6Runner -->|Real-time Metrics| InfluxDB
+    InfluxDB -->|Query| Grafana
+```
+
+---
+
+## 7. Database Schema
+
+```mermaid
+erDiagram
+    QUOTES {
+        int id PK "Primary Key, Auto Increment"
+        text quote "Quote text content"
+        text author "Quote author"
+    }
+
+    %% Indexes
+    QUOTES ||--|| RANDOM_IDX : "ORDER BY RANDOM()"
+```
+
+---
+
+## 8. Deployment Architecture (Ansible + Docker)
+
+```mermaid
+flowchart TB
+    subgraph LocalDev["Local Development"]
+        AnsiblePlaybook["Ansible Playbooks\ndeploy.yml\nshutdown.yml"]
+        Inventory["inventory/hosts.ini\nlocalhost"]
+        Vars["group_vars/all.yml\nEnvironment Config"]
+    end
+
+    subgraph Execution["Execution Flow"]
+        CheckDocker["1. Verify Docker"]
+        TemplateEnv["2. Template .env"]
+        ComposeUp["3. docker compose up"]
+        HealthCheck["4. Health Checks\nPostgres, Backend, Nginx"]
+    end
+
+    subgraph Services["Services Deployed"]
+        PostgresSvc[("PostgreSQL")]
+        BackendSvc["Rust Backend"]
+        FrontendSvc["Frontend"]
+        NginxSvc["Nginx Proxy"]
+        PrometheusSvc["Prometheus"]
+        GrafanaSvc["Grafana"]
+        InfluxDBSvc["InfluxDB"]
+    end
+
+    AnsiblePlaybook --> Inventory
+    AnsiblePlaybook --> Vars
+    
+    AnsiblePlaybook --> CheckDocker
+    CheckDocker --> TemplateEnv
+    TemplateEnv --> ComposeUp
+    ComposeUp --> HealthCheck
+    
+    HealthCheck --> PostgresSvc
+    HealthCheck --> BackendSvc
+    HealthCheck --> NginxSvc
+    HealthCheck --> PrometheusSvc
+    HealthCheck --> GrafanaSvc
+    HealthCheck --> InfluxDBSvc
+```
+
+---
+
+## 9. Complete Infrastructure Overview
+
+```mermaid
+flowchart TB
+    subgraph Users["End Users"]
+        Browser["🌐 Web Browser"]
+    end
+
+    subgraph Edge["Edge Layer"]
+        NginxEdge["Nginx\nReverse Proxy\nPort 8000"]
+    end
+
+    subgraph AppTier["Application Tier"]
+        FrontendApp["Frontend\nHTML/CSS/JS"]
+        BackendApp["Backend API\nRust + Axum\nPort 8080"]
+    end
+
+    subgraph DataTier["Data Tier"]
+        PostgresDB[("PostgreSQL\nPort 5435")]
+    end
+
+    subgraph ObservabilityTier["Observability Tier"]
+        Prom[("Prometheus\nPort 9090")]
+        Graf["Grafana\nPort 3000"]
+        Influx[("InfluxDB\nPort 8086")]
+    end
+
+    subgraph TestingTier["Testing Tier"]
+        K6Test["k6 Load Tester"]
+    end
+
+    Browser -->|HTTP| NginxEdge
+    NginxEdge -->|Static| FrontendApp
+    NginxEdge -->|API /api/*| BackendApp
+    BackendApp -->|SQL| PostgresDB
+    
+    BackendApp -.->|Metrics| Prom
+    Prom -.->|Visualization| Graf
+    
+    K6Test -->|Load Test| NginxEdge
+    K6Test -.->|Results| Influx
+    Influx -.->|Query| Graf
+```
+
+---
+
+## 10. Git Repository Structure
+
+```mermaid
+flowchart TD
+    subgraph Root["Quote Generator Repository"]
+        RootFiles["README.md\ndocker-compose.yml\nMakefile\n.env.example"]
+        
+        subgraph Backend["📁 backend/"]
+            Cargo["Cargo.toml"]
+            Src["src/\nmain.rs\nroutes.rs\nhandlers.rs\nmodels.rs\ndb.rs\nstate.rs"]
+            DockerfileBE["Dockerfile"]
+        end
+
+        subgraph FrontendDir["📁 frontend/"]
+            Index["index.html"]
+            CSS["css/style.css"]
+            JS["js/app.js"]
+            DockerfileFE["Dockerfile"]
+        end
+
+        subgraph NginxDir["📁 nginx/"]
+            NginxConf["nginx.conf"]
+        end
+
+        subgraph MonitoringDir["📁 prometheus/ + grafana/"]
+            PromYml["prometheus.yml"]
+            Dash["dashboards/*.json"]
+            Prov["provisioning/"]
+        end
+
+        subgraph LoadTestDir["📁 load-testing/"]
+            Smoke["smoke_test.js"]
+            Load["load_test.js"]
+            Stress["stress_test.js"]
+            Spike["spike_test.js"]
+            Soak["soak_test.js"]
+        end
+
+        subgraph AnsibleDir["📁 ansible/"]
+            Playbooks["playbooks/\ndeploy.yml\nshutdown.yml"]
+            InventoryAns["inventory/hosts.ini"]
+            Roles["roles/"]
+        end
+
+        subgraph GitHubDir["📁 .github/workflows/"]
+            BackendCIYAML["backend-ci.yml"]
+            FrontendCIYAML["frontend-ci.yml"]
+            DockerCIYAML["docker-ci.yml"]
+        end
+    end
+```
+
+---
+
+# Usage Instructions
+
+To use these diagrams:
+
+1. **In Markdown files**: Wrap in triple backticks with `mermaid` language tag
+2. **In GitHub/GitLab**: Native mermaid support in README files
+3. **In Notion**: Use `/mermaid` command and paste code
+4. **In Draw.io**: Use Advanced > Mermaid to paste and render
+5. **In Presentations**: Export as SVG/PNG from mermaid.live
+
+Recommended online editor: https://mermaid.live
