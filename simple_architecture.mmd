@@ -1,0 +1,49 @@
+```mermaid
+flowchart TB
+    subgraph UserLayer["👤 User Layer"]
+        User["Web Browser"]
+    end
+
+    subgraph ProxyLayer["🌐 Reverse Proxy"]
+        Nginx["Nginx<br/>Port 8000"]
+    end
+
+    subgraph AppLayer["⚙️ Application Layer"]
+        Frontend["Frontend<br/>HTML/CSS/JS"]
+        Backend["Backend API<br/>Rust + Axum<br/>Port 8080"]
+    end
+
+    subgraph DataLayer["🗄️ Data Layer"]
+        Postgres[("PostgreSQL<br/>Port 5435")]
+    end
+
+    subgraph MonitorLayer["📊 Monitoring Layer"]
+        Prometheus["Prometheus<br/>Port 9090"]
+        Grafana["Grafana<br/>Port 3000"]
+    end
+
+    subgraph TestLayer["🧪 Testing Layer"]
+        K6["k6 Load Tester"]
+        InfluxDB[("InfluxDB<br/>Port 8086")]
+    end
+
+    User -->|HTTP Request| Nginx
+    Nginx -->|Static Files| Frontend
+    Nginx -->|API /api/*| Backend
+    Backend -->|SQL Queries| Postgres
+    Backend -.->|Metrics| Prometheus
+    Prometheus -.->|Visualization| Grafana
+    K6 -->|Load Test| Nginx
+    K6 -.->|Results| InfluxDB
+    InfluxDB -.->|Dashboard| Grafana
+
+    style User fill:#e1f5ff
+    style Nginx fill:#fff3e0
+    style Frontend fill:#e8f5e9
+    style Backend fill:#ffebee
+    style Postgres fill:#f3e5f5
+    style Prometheus fill:#fff8e1
+    style Grafana fill:#e0f2f1
+    style K6 fill:#fce4ec
+    style InfluxDB fill:#f3e5f5
+```
